@@ -12,6 +12,8 @@ import os
 import pickle
 from scipy.stats import zscore
 from math import isnan
+from tabulate import tabulate
+
 
 """This script gbt_fluxes.py extracts sources' fluxes from the GBT pointing 
 scans performed before RadioAstron observations. 
@@ -235,24 +237,32 @@ def readCODES():
 
 
 
-def clean_anyband(df, do_plots = False, do_prints = True, band = 'l'):
+def clean_anyband(df, do_plots = False, do_prints = True, band = 'l', **kwargs):
     """Clean ANY-band data, namely for: 
-        + large offsets from the center
-        + large difference between RCP and LCP
-        + unnatural amplitude (<0, >200)
-        + size is much larger or much smaller than the beam
+        * large offsets from the center
+        * large difference between RCP and LCP
+        * unnatural amplitude (<0, >200)
+        * size is much larger or much smaller than the beam
         
-        :df:        dataframe with single frequency data
+        Args:
+            df:        dataframe with single frequency data
+            
+            do_plots (boolean):  If True, make a bunch of plots for all 
+                        stages of filtering
+            
+            do_prints (boolean): If True(default), print out some useful info 
+                        on what happens
+                    
+            band:      observing band. Namely one of ['l', 'k']
+            
+            **kwargs: Optional arguments to overwrite default setting for cleaning
+                    MAX_OFFSET: maximal offset of the Gaussian center from 0 in BEAMs
+                    MAX_FLUX: maximum FLUX allowed. (MIN_FLUX = 0)
+                    MIN_WIDTH: min size in units of the BEAM
+                    MAX_WIDTH: max size in units of the BEAM
+                    MIN_FLUX_RATIO: minimum RCP / LCP FLUX ratio. (MAX_FLUX_RATIO = 1 / MIN_FLUX_RATIO)
         
-        :do_plots:  boolean. If True, make a bunch of plots for all 
-                    stages of filtering
-        
-        :do_prints: boolean. If True(default), print out some useful info 
-                    on what happens
-                
-        :band:      observing band. Namely one of ['l', 'k']
-        
-        :return:    df with suspicious data flagged => flag = 1
+        Returns:    df with suspicious data deleted
     """
 #    dl=df[(df.ObsFreq > 1) & (df.ObsFreq < 2)]  # select only L-band (1.6 GHz) for ease of usage
     # I want simply return the cleaned dataframe. So let require a single-band dataframe to be provided
@@ -262,14 +272,47 @@ def clean_anyband(df, do_plots = False, do_prints = True, band = 'l'):
     # beam FWHM is 18 cm / 100 m in arcseconds
     BEAM = 18/10000 * 206265 
     BEAM = np.median(dl.Width)  # a better way to get the beam width directly from data
+    
+    if do_prints:
+        print("\n\n")
+        print("Start cleaning {}-band data".format(band.upper()))
+        print("initially there are {} data points".format(dl.index.size))
+
+
     # maximal offset of the Gaussian center from 0 in BEAMs
-    MAX_OFFSET = 1 
-    MAX_FLUX = 200
+    if 'MAX_OFFSET' in kwargs:
+        print("  MAX_OFFSET redefined to {} BEAMs".format(kwargs['MAX_OFFSET']) )
+        MAX_OFFSET = kwargs['MAX_OFFSET']
+    else:
+        MAX_OFFSET = 1 
+        
+    # max FLUX 
+    if 'MAX_FLUX' in kwargs:
+        print("  MAX_FLUX redefined to {} Jy".format(kwargs['MAX_FLUX']) )
+        MAX_FLUX = kwargs['MAX_FLUX']
+    else:
+        MAX_FLUX = 200
+    
     # min and max sizes in units of the beam
-    MIN_WIDTH = 0.7
-    MAX_WIDTH = 1.3
+    if 'MIN_WIDTH' in kwargs:
+        print("  MIN_WIDTH redefined to {} BEAMs".format(kwargs['MIN_WIDTH']) )
+        MIN_WIDTH = kwargs['MIN_WIDTH']
+    else:
+        MIN_WIDTH = 0.7    
+    
+    if 'MAX_WIDTH' in kwargs:
+        print("  MAX_WIDTH redefined to {} BEAMs".format(kwargs['MAX_WIDTH']) )
+        MAX_WIDTH = kwargs['MAX_WIDTH']
+    else:
+        MAX_WIDTH = 1.3
+    
     # min and max ratio of RCP FLUX to LCP FLUX. 
-    MIN_FLUX_RATIO = 0.5
+    if 'MIN_FLUX_RATIO' in kwargs:
+        print("  MIN_FLUX_RATIO redefined to {} BEAMs".format(kwargs['MIN_FLUX_RATIO']) )
+        MIN_FLUX_RATIO = kwargs['MIN_FLUX_RATIO']
+    else:
+        MIN_FLUX_RATIO = 0.5 
+
     MAX_FLUX_RATIO = 1 / MIN_FLUX_RATIO
     
     
@@ -281,10 +324,6 @@ def clean_anyband(df, do_plots = False, do_prints = True, band = 'l'):
     do_width = True
     do_flux_ratio = True
     
-    if do_prints:
-        print("\n\n")
-        print("Start cleaning {}-band data".format(band.upper()))
-        print("initially there are {} data points".format(dl.index.size))
     
     if do_plots and False:
         # original data, FLUX(time)
@@ -441,8 +480,100 @@ def clean_anyband(df, do_plots = False, do_prints = True, band = 'l'):
 
 
 
-    return df
+    return dl
     
+
+def write_out(df, outfile):
+    """Print out a catalogue in the following format
+        Source - B1950 source name
+        RACODE - RadioAstron code in short notation
+        MJDate - MJD of the measurement
+        J2000RA - RA in J2000
+        J2000Dec - Dec in J2000
+        ObsFreq - Frequency in GHz
+        Pol - Polarisation
+        FLUX - Source's flux density in Jy
+        FLUXERR - Error on FLUX in Jy 
+
+
+        :Example: 
+        Source	RACODE	MJDate	J2000RA	J2000Dec	ObsFreq	Pol	FLUX	FLUXERR
+        0007+106	RK12EJ	57329.27985	2.62920833	10.97486111	22.236	LCP	0.2159184048717979	0.003388315790916462
+
+    
+        :df: DataFrame with cleaned data
+        
+        :outfile: filename to write catalogue to
+        
+        :return: a smiley 
+    """
+    
+    cols = ['Source', 'RACODE', 'MJDate', 'J2000RA', 'J2000Dec', 'ObsFreq', 'Pol', 'FLUX', 'FLUXERR']
+    do = df.loc[:, cols]
+    
+    with open(outfile, 'w') as OUT:
+        content = tabulate(do.values.tolist(), list(do.columns), tablefmt="plain", floatfmt=(".5f",".5f",".5f",".5f",".5f",".5f", ".2f",".2f",".2f"))
+        OUT.write(content)
+    
+    print(":)")
+    return ":)"
+
+
+def sanity_check(df, outfile = None, title = None):
+    """Make various plots out of data, e.g. to check whether cleaning performed well. 
+The following plots are produced: 
+    * Offset(time)
+    * Width(time)
+    * FLUX + FLUXERR (time)
+    * RCP_FLUX / LCP_FLUX (time)
+    
+    
+    Args:
+        df (Pandas DataFrame): data as returned by clean_anyband(), for instance
+        outfile (string, optional): save all plots to this file
+    
+    Returns:
+        nothing
+        
+    TODO:
+        add a hardcopy saving part
+        
+    """
+    
+    dl = df # don't judge me. Even for this comment. 
+    
+    
+    fig, ax = plt.subplots(2,2, figsize = [12,9])
+    
+    ax[0][0].plot(dl.MJDate, dl.Offset, 'ob', label = 'Offset')
+    ax[0][0].set_xlabel('MJD')
+    ax[0][0].set_ylabel('Offset (arcsec)')
+        
+    ax[0][1].plot(dl.MJDate, dl.FLUX, 'ob', label = 'FLUX')
+    ax[0][1].set_xlabel('MJD')
+    ax[0][1].set_ylabel('FLUX (Jy)')
+
+    ax[1][0].plot(dl.MJDate, dl.Width, 'ob', label = 'Width')
+    ax[1][0].set_xlabel('MJD')
+    ax[1][0].set_ylabel('Width (arcsec)')
+
+    
+    ax[1][1].plot(dl.MJDate, dl.ratio, 'ob', label = 'RCP/LCP flux ratio')
+    ax[1][1].set_xlabel('MJD')
+    ax[1][1].set_ylabel('RCP/LCP Flux ratio')
+#    fig.legend()    
+    
+    if title is not None:
+        fig.suptitle(title)
+    
+    
+
+    
+
+
+    return
+    
+
 #%%
     # MAIN
     
@@ -468,10 +599,9 @@ if read_data:
     
     FINAL = FINAL[0:0]
 #    PATH = '/home/mikhail/sci/gbt_pointing/out' # all RadioAstron files
-    PATH = '/homes/mlisakov/sci/gbt_pointing/out'  # all RadioAstron files on vlb098
-    #PATH = '/home/mikhail/sci/gbt_pointing/rg28' # rg28 files
-#    PATH = '/homes/mlisakov/sci/gbt_pointing/rg28'   # rg28 files on vlb098
+#    PATH = '/homes/mlisakov/sci/gbt_pointing/out'  # all RadioAstron files on vlb098
     
+    PATH = 'out/'
     
     print("Reading data from {}".format(PATH))
     
@@ -516,31 +646,23 @@ if read_data:
     print('Saving FINAL to a pickle file')
     FINAL.to_pickle('fluxes_gbt.pkl')
             
-#FINAL = FINAL[FINAL.ObsFreq > 1 ]  # to remove P-band measurements, which are mainly useless for survey and are indeed noisy/
-
-# add flag column
-FINAL.loc[:, 'flag'] = 0
-
-FINAL_L = clean_anyband(FINAL[(FINAL.ObsFreq > 1 ) & (FINAL.ObsFreq < 2) ], do_plots= True, band = 'l')
-FINAL_K = clean_anyband(FINAL[(FINAL.ObsFreq > 20 )], do_plots= True, band = 'k')
 
 
-#F= FINAL
-#F=FINAL[FINAL.ObsFreq > 20]
-#F = FINAL[(FINAL.ObsFreq > 2) & (FINAL.ObsFreq < 10)]
-#F=FINAL[FINAL.ObsFreq < 2]
+
+# process L-band and K-band data separately
+FINAL_L = clean_anyband(FINAL[(FINAL.ObsFreq > 1 ) & (FINAL.ObsFreq < 2) ], do_plots= False, band = 'l', MAX_OFFSET = 0.3)
+FINAL_K = clean_anyband(FINAL[(FINAL.ObsFreq > 20 )], do_plots= False, band = 'k', MIN_FLUX_RATIO = 0.8)
+
+# make essential plots of the cleanes data
+sanity_check(FINAL_L, title = 'L-band')
+sanity_check(FINAL_K, title = 'K-band')
+
+# save results on a per band basis
+write_out(FINAL_L, 'gbt_lband_fluxes_final.dat')
+write_out(FINAL_K, 'gbt_kband_fluxes_final.dat')
 
 
-#F = F[F.GBT == 'AGBT14B_502_76']
-'''
-fig,ax = plt.subplots(1,1)
-#ax.errorbar(F.MJDate, F.FLUX, F.FLUXERR, fmt = 'x' )
-#ax.errorbar(F.MJDate, F.Offset, F.OffsetError, fmt = 'x' )
-#ax.plot(F.MJDate, F.FLUX, 'o')
-ax.plot(F.MJDate, F.Offset, 'o')
-#ax.set_ylabel('Flux density [Jy]')
-ax.set_xlabel('MJD')
-'''
+
 
 
 
