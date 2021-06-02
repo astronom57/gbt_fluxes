@@ -566,6 +566,11 @@ The following plots are produced:
     if title is not None:
         fig.suptitle(title)
     
+    if outfile:
+        try:
+            fig.savefig(outfile)
+        except:
+            print("Can not save plots to {}".format(outfile))
     
 
     
@@ -651,11 +656,11 @@ if read_data:
 
 # process L-band and K-band data separately
 FINAL_L = clean_anyband(FINAL[(FINAL.ObsFreq > 1 ) & (FINAL.ObsFreq < 2) ], do_plots= False, band = 'l', MAX_OFFSET = 0.3)
-FINAL_K = clean_anyband(FINAL[(FINAL.ObsFreq > 20 )], do_plots= False, band = 'k', MIN_FLUX_RATIO = 0.8)
+FINAL_K = clean_anyband(FINAL[(FINAL.ObsFreq > 20 )], do_plots= False, band = 'k', MIN_FLUX_RATIO = 0.8, MAX_FLUX = 60)
 
 # make essential plots of the cleanes data
-sanity_check(FINAL_L, title = 'L-band')
-sanity_check(FINAL_K, title = 'K-band')
+sanity_check(FINAL_L, title = 'L-band', outfile = 'gbt_lband_fluxes_final.png')
+sanity_check(FINAL_K, title = 'K-band', outfile = 'gbt_kband_fluxes_final.png')
 
 # save results on a per band basis
 write_out(FINAL_L, 'gbt_lband_fluxes_final.dat')
